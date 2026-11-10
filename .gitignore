@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Raw run outputs (curated result files for the paper are in paper_results/)
+data/
+results/
+logs/
+nohup.out
+*.log

@@ -1,0 +1,6 @@
+numpy>=1.24
+scipy>=1.10
+pulp>=2.7,<4        # PuLP 4 changed the modelling API (LpVariable keywords); not supported yet
+scikit-learn>=1.2   # k-means bundling and the learning components (v5)
+pytest>=7          # optional: tests
+highspy>=1.7        # HiGHS solver (recommended)
