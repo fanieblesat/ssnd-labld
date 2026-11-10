@@ -17,3 +17,7 @@ Every figure of Section 6 is produced by running the scripts in this folder (`py
 | `wsLABLD_bundle.csv`, `hL_bundle.csv` | Study A, learned partition: zero and P12 (LABLD) | `run_learning.py eval --ws-partition learned` |
 | `wsL_s60.csv`, `hL_s60.csv` | Study A, learned partition: P60 (LABLD) | `run_learning.py eval --ws-partition learned` |
 | `sus.csv` | Sustainability study (out of sample, 5 seeds x 2 settings x 5 carbon prices) | `run_sustainability.py` |
+| `tune_theta.csv` | Choice of the first-step factor theta_w on training instances 301-303 (60 scenarios) | `tune_theta.py` |
+| `scaling_s60tw.csv`, `hS_s60tw.csv` | 240 scenarios, learned start P60 with theta_w = 0.5 | `run_scaling.py --models --theta-warm 0.5` |
+| `wsA_s60tw.csv`, `hW_s60tw.csv` | Study A, stratified partition: P60 with theta_w = 0.5 | `run_learning.py eval --theta-warm 0.5` |
+| `wsL_s60tw.csv`, `hL_s60tw.csv` | Study A, learned partition: P60 with theta_w = 0.5 (LABLD) | `run_learning.py eval --ws-partition learned --theta-warm 0.5` |
