@@ -1,0 +1,30 @@
+policy search on 15 training runs ...
+policy search starts at models/small_bundle.pkl: w=[0.17 0.37 0.04 0.  ] (scale=bundle)
+    policy search: initial w=[0.17 0.37 0.04 0.  ]  closure=0.1152
+    policy search: eval   1  closure=0.1194  w=[0.2625 0.37   0.04   0.    ]
+    policy search: eval   2  closure=0.1272  w=[0.2625 0.4625 0.04   0.    ]
+    policy search: eval   3  closure=0.1391  w=[0.2625 0.4625 0.1325 0.    ]
+    policy search: eval   8  closure=0.1430  w=[0.2625 0.555  0.1325 0.    ]
+    policy search: eval   9  closure=0.1470  w=[0.2625 0.555  0.225  0.    ]
+    policy search: eval  21  closure=0.1475  w=[0.2162 0.555  0.225  0.    ]
+    policy search: eval  40  closure=0.1477  w=[0.2162 0.555  0.2481 0.    ]
+    policy search: eval  46  closure=0.1477  w=[0.2162 0.5319 0.2481 0.    ]
+dual start policy: {
+ "scale": "bundle",
+ "train_closure_mean": 0.14769529118917343,
+ "train_closure_min": -0.0348667120624674,
+ "train_cases": 15,
+ "evals": 60,
+ "weights": {
+  "xi_dev": 0.21625,
+  "dem_dev": 0.53188,
+  "ylp_dev": 0.24813,
+  "P_dev": 0.0
+ },
+ "validation_closure_mean": 0.15608283856510993,
+ "validation_closure_min": 0.06786505707838791,
+ "validation_cases": 5,
+ "seconds": 8135.1
+}
+partition scorer taken from models/small_bundle.pkl
+models saved to models/s60.pkl

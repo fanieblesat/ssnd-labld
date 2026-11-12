@@ -21,3 +21,6 @@ Every figure of Section 6 is produced by running the scripts in this folder (`py
 | `scaling_s60tw.csv`, `hS_s60tw.csv` | 240 scenarios, learned start P60 with theta_w = 0.5 | `run_scaling.py --models --theta-warm 0.5` |
 | `wsA_s60tw.csv`, `hW_s60tw.csv` | Study A, stratified partition: P60 with theta_w = 0.5 | `run_learning.py eval --theta-warm 0.5` |
 | `wsL_s60tw.csv`, `hL_s60tw.csv` | Study A, learned partition: P60 with theta_w = 0.5 (LABLD) | `run_learning.py eval --ws-partition learned --theta-warm 0.5` |
+| train_s60.txt | Training log of the warm-start policy P60 (closure, weights, search time) | run_learning.py train |
+| scaling_polish.csv | Primal polishing by restricted deterministic equivalent | run_scaling.py --polish-time |
+| scaling_ml_unscaled.csv | 240 scenarios, first learned-start policy without the bundle scale (rejected by the guard) | run_scaling.py --models |
