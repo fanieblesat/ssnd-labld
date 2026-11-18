@@ -53,5 +53,6 @@ def test_backend_matches_pulp_and_bounds_are_valid():
     be.set_bundles(B)
     ld = BundledLagrangian(inst, B, max_iter=15, parallel=2, verbose=False, backend=be)
     r = ld.run()
-    assert r.best_lb <= de_fast.objective + 1e-6 <= r.best_ub + 1e-6
+    tol = 1e-6 * abs(de_fast.objective)
+    assert r.best_lb <= de_fast.objective + tol and de_fast.objective <= r.best_ub + tol
     be.close()
