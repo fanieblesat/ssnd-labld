@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import time
 import warnings
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -55,6 +56,17 @@ def get_solver(name: Optional[str] = None, msg: bool = False,
         if threads is not None:
             kw["threads"] = threads
         return pulp.PULP_CBC_CMD(**kw)
+    if name in ("GUROBI", "GUROBIPY"):
+        # gurobipy through PuLP, one Gurobi environment per thread (see GurobiPerSolve), so bundle
+        # MILPs can run concurrently in threads.
+        # Threads defaults to 1, because the decomposition already solves `parallel` bundles at once;
+        # pass threads=... for the deterministic equivalent.
+        kw = dict(msg=msg, Threads=threads if threads is not None else 1)
+        if time_limit is not None:
+            kw["timeLimit"] = time_limit
+        if gap_rel is not None:
+            kw["gapRel"] = gap_rel
+        return GurobiPerSolve(**kw)
     kw = dict(msg=msg)
     if time_limit is not None:
         kw["timeLimit"] = time_limit
@@ -63,6 +75,75 @@ def get_solver(name: Optional[str] = None, msg: bool = False,
     if threads is not None and name in ("HIGHS", "HIGHS_CMD"):
         kw["threads"] = threads
     return pulp.getSolver("HiGHS" if name == "HIGHS" else name, **kw)
+
+
+_GRB_LOCAL = threading.local()
+
+
+def _thread_gurobi_env(retries: int = 5):
+    """One Gurobi environment per thread, created once and reused for every solve in that thread.
+    With a web (WLS) licence, creating an environment fetches a licence token over the internet;
+    reusing it avoids thousands of token requests and makes a run robust to short network outages.
+    Environment creation is retried with back-off if the token server cannot be reached."""
+    env = getattr(_GRB_LOCAL, "env", None)
+    if env is not None:
+        return env
+    import gurobipy as gp
+    delay = 5.0
+    for attempt in range(retries):
+        try:
+            env = gp.Env(empty=True)
+            env.setParam("OutputFlag", 0)
+            env.start()
+            _GRB_LOCAL.env = env
+            return env
+        except gp.GurobiError as e:
+            if attempt == retries - 1:
+                raise
+            warnings.warn(f"Gurobi environment could not start ({e}); retrying in {delay:.0f}s", RuntimeWarning)
+            time.sleep(delay)
+            delay *= 2
+
+
+class GurobiPerSolve(pulp.LpSolver):
+    """Gurobi through PuLP, safe for concurrent use. PuLP's GUROBI object keeps one model and reuses
+    it, so it can neither be shared between threads nor reused across problems. This wrapper builds
+    a fresh GUROBI object for every solve, inside the calling thread's own Gurobi environment
+    (`_thread_gurobi_env`), records the MIP dual bound, and disposes of the model afterwards."""
+
+    def __init__(self, **kw):
+        kw.pop("manageEnv", None)
+        self.kw = kw
+        super().__init__(mip=kw.get("mip", True), msg=kw.get("msg", False),
+                         timeLimit=kw.get("timeLimit"), gapRel=kw.get("gapRel"))
+
+    def available(self):
+        try:
+            _thread_gurobi_env()
+            return True
+        except Exception:
+            return False
+
+    def actualSolve(self, lp, **kwargs):
+        solver = pulp.GUROBI(env=_thread_gurobi_env(), **self.kw)
+        try:
+            status = solver.actualSolve(lp, **kwargs)
+            m = lp.solverModel
+            lp._gurobi_obj_bound = None
+            try:
+                if m.IsMIP:
+                    lp._gurobi_obj_bound = float(m.ObjBound)
+            except Exception:
+                pass
+        finally:
+            try:                               # dispose of the model only; the environment is reused
+                if getattr(solver, "model", None) is not None:
+                    solver.model.dispose()
+            except Exception:
+                pass
+            solver.init_gurobi = False
+            lp.solverModel = None
+        return status
 
 
 def _cbc_available() -> bool:
@@ -76,13 +157,21 @@ def _cbc_available() -> bool:
 
 
 def _mip_dual_bound(prob: pulp.LpProblem) -> Optional[float]:
-    """Best proven lower bound of a MIP stopped early (HiGHS through PuLP's highspy interface).
-    Returns None when the solver does not expose it."""
+    """Best proven lower bound of a MIP stopped early (HiGHS through highspy, or Gurobi through
+    gurobipy). Returns None when the solver does not expose it."""
+    gb = getattr(prob, "_gurobi_obj_bound", None)        # Gurobi (recorded by GurobiPerSolve)
+    if gb is not None:
+        return gb if np.isfinite(gb) else None
     m = getattr(prob, "solverModel", None)
-    if m is None or not hasattr(m, "getInfo"):
+    if m is None:
         return None
     try:
-        v = float(m.getInfo().mip_dual_bound)
+        if hasattr(m, "getInfo"):                  # HiGHS
+            v = float(m.getInfo().mip_dual_bound)
+        elif hasattr(m, "ObjBound"):               # Gurobi
+            v = float(m.ObjBound)
+        else:
+            return None
     except Exception:
         return None
     return v if np.isfinite(v) else None
