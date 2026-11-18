@@ -141,7 +141,7 @@ def solution_similarity_bundles(inst: SSNDInstance, m: int, y_hat: Optional[np.n
 
 def cost_signatures(inst: SSNDInstance, designs: Optional[Sequence[Dict[int, float]]] = None,
                     n_designs: int = 4, seed: int = 0, solver=None, cache: Optional[Dict] = None,
-                    parallel: int = 1) -> np.ndarray:
+                    parallel: int = 1, evaluator=None) -> np.ndarray:
     """Signature matrix (|Omega| x D): Q_omega(y_d) for D candidate designs y_d.
 
     Default designs: all services off, all on, and random designs with activation prob. 0.35 / 0.65
@@ -160,7 +160,10 @@ def cost_signatures(inst: SSNDInstance, designs: Optional[Sequence[Dict[int, flo
             designs.append({a: float(rng.random() < p) for a in sids})
     cols = []
     for y in designs:
-        ev = evaluate_design(inst, y, solver, cache=cache, parallel=parallel)
+        if evaluator is not None:              # e.g. GurobiBackend.evaluate_design (persistent LPs)
+            ev = evaluator(y, cache=cache)
+        else:
+            ev = evaluate_design(inst, y, solver, cache=cache, parallel=parallel)
         cols.append([r.cost for r in ev.per_scenario])
     return np.array(cols).T
 
@@ -177,7 +180,7 @@ def cost_signature_bundles(inst: SSNDInstance, m: int, seed: int = 0, designs=No
 
 def stratified_bundles(inst: SSNDInstance, m: int, seed: int = 0, basis: str = "costsig",
                        n_strata: Optional[int] = None, solver=None, cache: Optional[Dict] = None,
-                       parallel: int = 1) -> Bundles:
+                       parallel: int = 1, evaluator=None) -> Bundles:
     """Diverse (anti-clustered) bundles of near-equal size.
 
     1. Cluster the scenarios into q = ceil(|Omega|/m) strata of similar scenarios, on cost signatures
@@ -188,7 +191,8 @@ def stratified_bundles(inst: SSNDInstance, m: int, seed: int = 0, basis: str = "
     regimes, as a random partition does on average, but by construction rather than by chance.
     """
     if basis == "costsig":
-        X = standardize(cost_signatures(inst, seed=seed, solver=solver, cache=cache, parallel=parallel))
+        X = standardize(cost_signatures(inst, seed=seed, solver=solver, cache=cache, parallel=parallel,
+                                        evaluator=evaluator))
     else:
         X = standardize(scenario_features(inst))
     S = len(X)

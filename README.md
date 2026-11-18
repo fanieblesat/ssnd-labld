@@ -262,3 +262,19 @@ and `run_learning.py eval` take `--theta-warm`. `phase3.sh` runs the choice and 
     tests/             unit tests (python -m pytest -q)
 
 Raw run outputs (`data/`, `results/`, `logs/`) are not tracked.
+
+## v11: Gurobi
+
+`--solver GUROBI` uses Gurobi through gurobipy (`pip install gurobipy`, plus a licence). Every solve gets
+its own Gurobi environment, so the decomposition can solve bundles concurrently; bundle MILPs use one
+thread each, and the deterministic equivalent uses `--parallel` threads. Time-limited solves report
+Gurobi's MIP dual bound (ObjBound), as with HiGHS.
+
+## v12: SND instances (IDSR benchmark) and a persistent Gurobi backend
+
+`ssnd_labld/snd_io.py` reads the SND_V1 format (multicommodity network design with stochastic demand);
+the model is the special case of ours with design arcs only, no spot capacity and no disruptions.
+`ssnd_labld/grb_backend.py` builds every bundle MILP and recourse LP once with gurobipy and only updates
+objective coefficients (bundles) or design bounds (recourse) afterwards; `BundledLagrangian(backend=...)`
+uses it. `solve_de_gurobi` solves the extensive form with the same strengthening as the benchmark
+(q_aks <= min(U_a, d_ks) y_a). `run_snd.py` compares both under the same time budget.

@@ -69,7 +69,7 @@ class BundledLagrangian:
                  parallel: int = 1, verbose: bool = True,
                  recourse_solver=None, eval_cache: Optional[Dict] = None,
                  theta_patience: int = 4, theta_min: float = 1e-3, reset_to_best: bool = True,
-                 theta_warm: Optional[float] = None):
+                 theta_warm: Optional[float] = None, backend=None):
         inst.validate()
         self.inst, self.bundles = inst, [list(b) for b in bundles]
         covered = sorted(w for b in self.bundles for w in b)
@@ -85,6 +85,8 @@ class BundledLagrangian:
         # initial Polyak factor after an accepted non-zero start (None: same as theta). A start that the guard
         # accepted is already closer to the dual optimum, so a full first step tends to overshoot.
         self.theta_warm = theta_warm
+        # optional persistent-model backend (grb_backend.GurobiBackend) for large scenario sets
+        self.backend = backend
         F = np.array([inst.arcs[a].F for a in self.sids])
         self.alpha0 = alpha0 if alpha0 is not None else 0.1 * float(F.mean())
         self.max_iter, self.time_limit, self.gap_tol, self.eps = max_iter, time_limit, gap_tol, eps
@@ -106,6 +108,12 @@ class BundledLagrangian:
         (CBC runs as a subprocess, so threads give real parallelism)."""
         lam = np.asarray(lam, dtype=float)
         assert lam.shape == (self.m, self.n)
+        if self.backend is not None:
+            vals, ys, proved = self.backend.solve_bundles(lam)
+            self.n_bundle_solves += self.m
+            self.n_unproved += int((~proved).sum())
+            self.open_count += (ys > 0.5).sum(axis=0)
+            return float(vals.sum()), ys
         if self.parallel > 1:
             with ThreadPoolExecutor(max_workers=self.parallel) as ex:
                 res = list(ex.map(lambda b: solve_bundle_subproblem(self.inst, self.bundles[b], lam[b], self.solver),
@@ -142,6 +150,8 @@ class BundledLagrangian:
         if design_key(self.inst, y) not in self.eval_cache:      # count only real (uncached) work
             self.n_recourse_solves += len(self.inst.scenarios)
             self.n_design_evals += 1
+        if self.backend is not None:
+            return self.backend.evaluate_design(y, cache=self.eval_cache)
         return evaluate_design(self.inst, y, self.recourse_solver, cache=self.eval_cache,
                                parallel=self.parallel)
 
