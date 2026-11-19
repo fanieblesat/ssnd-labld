@@ -38,6 +38,12 @@ from ssnd_labld.snd_io import read_snd
 
 def append(path, row):
     new = not os.path.exists(path)
+    if not new:                                      # refuse to append under a different header
+        with open(path) as f:
+            header = f.readline().strip().split(",")
+        if header != list(row.keys()):
+            raise RuntimeError(f"{path}: header {header} differs from {list(row.keys())}; "
+                               f"repair the file or use a new --out folder")
     with open(path, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(row.keys()))
         if new:

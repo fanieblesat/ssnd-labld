@@ -66,7 +66,16 @@ def _recourse_and_subgradients(be: GurobiBackend, yv: np.ndarray):
             m, yy, _, _ = be.rmodels[i]
             yy.LB = yv
             yy.UB = yv
-            m.optimize()
+            for attempt in range(3):                 # transient errors (e.g. licence token refresh): retry
+                try:
+                    m.optimize()
+                    break
+                except gp.GurobiError as e:
+                    if attempt == 2:
+                        raise RuntimeError(f"recourse LP {i}: GurobiError {e.errno}: {e.message}") from e
+                    time.sleep(2.0 * (attempt + 1))
+            if m.Status != GRB.OPTIMAL:
+                raise RuntimeError(f"recourse LP {i}: status {m.Status}")
             Q[i] = m.ObjVal
             G[i] = yy.RC
 
@@ -152,9 +161,16 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
     state = dict(cands=0)
 
     def cb(model, where):
-        nonlocal best_ub, best_y
-        if where != GRB.Callback.MIPSOL:
+        if where != GRB.Callback.MIPSOL or "error" in state:
             return
+        try:
+            _on_solution(model)
+        except Exception as e:                       # never let Gurobi swallow an error: stop and re-raise
+            state["error"] = e
+            model.terminate()
+
+    def _on_solution(model):
+        nonlocal best_ub, best_y
         yv = np.round(np.array(model.cbGetSolution(ylist)))
         tv = np.array(model.cbGetSolution(thlist))
         Q, G = _recourse_and_subgradients(be, yv)
@@ -170,6 +186,11 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
     if verbose:
         m.Params.OutputFlag = 1
     m.optimize(cb)
+    if "error" in state:
+        m.dispose(); env.dispose()
+        if own_be:
+            be.close()
+        raise state["error"]
     lb = float(m.ObjBound) if m.SolCount > 0 or m.Status == GRB.OPTIMAL else lp_bound
     lb = max(lb, lp_bound)
     proved = m.Status == GRB.OPTIMAL
