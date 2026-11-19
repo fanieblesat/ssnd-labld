@@ -77,3 +77,27 @@ def test_deadline_keeps_bounds_valid():
     assert r.best_lb <= de.objective + tol and de.objective <= r.best_ub + tol
     assert r.seconds < 5.0
     be.close()
+
+
+@pytest.mark.skipif(not _gurobi_ok(), reason="Gurobi not available")
+@pytest.mark.parametrize("ev_block", [False, True])
+def test_benders_matches_de(ev_block):
+    from ssnd_labld.benders import _recourse_and_subgradients, solve_benders
+    from ssnd_labld.grb_backend import GurobiBackend, solve_de_gurobi
+    inst = _small_snd(N=12, seed=2)
+    de = solve_de_gurobi(inst, threads=1, mip_gap=1e-9)
+    be = GurobiBackend(inst, parallel=2)
+    # cuts are valid: Q_s(y') >= Q_s(y) + g_s'(y' - y) for random y, y' in [0,1]^n
+    rng = np.random.default_rng(0)
+    n = len(inst.service_ids)
+    for _ in range(5):
+        y0, y1 = rng.uniform(size=n), rng.uniform(size=n)
+        Q0, G0 = _recourse_and_subgradients(be, y0)
+        Q1, _ = _recourse_and_subgradients(be, y1)
+        assert np.all(Q1 >= Q0 + G0 @ (y1 - y0) - 1e-6 * np.maximum(1, np.abs(Q1)))
+    r = solve_benders(inst, time_limit=60, threads=2, mip_gap=1e-9, ev_block=ev_block, backend=be)
+    tol = 1e-5 * abs(de.objective)
+    assert r.proved_optimal
+    assert abs(r.ub - de.objective) <= tol and r.lb <= de.objective + tol
+    assert r.lp_bound <= de.objective + tol
+    be.close()

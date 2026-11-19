@@ -291,3 +291,16 @@ uses it. `solve_de_gurobi` solves the extensive form with the same strengthening
   `history.csv` gains a `method` column.
 - `phase_snd.sh`: diagnosis on the main IDSR instance (seed 2): bundle MIP gap, Polyak factor, bundle
   size, and Gurobi with one hour.
+
+## v14: Benders baseline (`ssnd_labld/benders.py`, `run_snd.py --methods bd`)
+
+Multi-cut Benders for continuous recourse: Kelley rounds on the master LP (share `--bd-phase1-share` of
+the budget), then branch-and-cut with lazy cuts at integer candidates. Cuts come from the persistent
+recourse LPs of `GurobiBackend` (reduced costs of the fixed y are subgradients of the convex value
+function). By default the master contains the recourse block of the mean-demand scenario (Jensen bound,
+valid because the recourse value is convex in the demand); `--bd-no-ev` switches it off. Every
+candidate is evaluated on all scenarios, so the upper bound is an exact full-set cost.
+
+In `snd.csv`, rows of method `bd` use `lb0` for the master LP bound after phase 1, `iterations` for the
+LP cut rounds, `bundles` for the integer candidates evaluated and `unproved_bundles` for the number of
+cuts. `phase_bd.sh` runs Benders on the five IDSR instances (about 2.5 hours).

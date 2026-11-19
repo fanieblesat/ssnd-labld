@@ -12,6 +12,8 @@ For every instance:
       partition, model building and the iterations. Bundle values are Gurobi bounds, so LB is valid.
 The budget is a hard wall-clock limit for LD: each bundle MILP gets at most the remaining time, and an
 iteration interrupted by the deadline is discarded (the bounds of the last complete iteration are kept).
+  BD  multi-cut Benders (ssnd_labld/benders.py): Kelley rounds on the master LP, then branch-and-cut
+      with lazy cuts; mean-demand block in the master unless --bd-no-ev; same budget, model building included.
 Output: snd.csv (one row per instance and method), history.csv (LD trajectory), designs.json (the
 design of each method, as a list of open arcs). lb0 is the LD bound at zero multipliers (the bundle /
 group-subproblem bound). --tag labels a variant (method "ld_<tag>" / "de_<tag>"), so several settings
@@ -29,6 +31,7 @@ import time
 import numpy as np
 
 from ssnd_labld import BundledLagrangian, random_bundles, stratified_bundles
+from ssnd_labld.benders import solve_benders
 from ssnd_labld.grb_backend import GurobiBackend, solve_de_gurobi
 from ssnd_labld.snd_io import read_snd
 
@@ -58,7 +61,7 @@ def save_design(path, name, method, y):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--instances", nargs="+", required=True)
-    ap.add_argument("--methods", nargs="+", default=["de", "ld"], choices=["de", "ld"])
+    ap.add_argument("--methods", nargs="+", default=["de", "ld"], choices=["de", "ld", "bd"])
     ap.add_argument("--time-limit", type=float, default=1800.0)
     ap.add_argument("--parallel", type=int, default=8, help="threads for the DE / workers for LD")
     ap.add_argument("--bundle-size", type=int, default=10)
@@ -67,6 +70,8 @@ def main():
     ap.add_argument("--bundle-time-limit", type=float, default=300.0)
     ap.add_argument("--bundle-gap", type=float, default=1e-6, help="MIP gap of the bundle MILPs (bound stays valid)")
     ap.add_argument("--theta", type=float, default=1.0, help="Polyak factor")
+    ap.add_argument("--bd-no-ev", action="store_true", help="Benders without the mean-demand block")
+    ap.add_argument("--bd-phase1-share", type=float, default=0.25, help="budget share of the LP cut rounds")
     ap.add_argument("--tag", default="", help="variant label appended to the method name")
     ap.add_argument("--recovery-every", type=int, default=3)
     ap.add_argument("--ls-evals", type=int, default=8)
@@ -80,7 +85,7 @@ def main():
     finished = done(out)
     strong = not args.no_strong_linking
     sfx = f"_{args.tag}" if args.tag else ""
-    m_de, m_ld = "de" + sfx, "ld" + sfx
+    m_de, m_ld, m_bd = "de" + sfx, "ld" + sfx, "bd" + sfx
 
     for path in args.instances:
         inst = read_snd(path)
@@ -131,6 +136,22 @@ def main():
             print(f"  {m_ld.upper()}: LB0={res.history[0]['best_lb']:.2f} LB={res.best_lb:.2f} UB={res.best_ub:.2f} gap={100 * res.gap:.3f}% "
                   f"iters={res.iterations} m={m} prep={t_prep:.0f}s total={res.seconds + t_prep:.0f}s", flush=True)
             be.close()
+
+        if "bd" in args.methods and (name, m_bd) not in finished:
+            r = solve_benders(inst, time_limit=args.time_limit, threads=args.parallel, strong_linking=strong,
+                              ev_block=not args.bd_no_ev, phase1_share=args.bd_phase1_share)
+            for h in r.history:
+                append(hist, dict(instance=name, method=m_bd, t=h["round"], L="", LB=round(h["lb"], 4),
+                                  UB=round(h["ub"], 4) if np.isfinite(h["ub"]) else "", time=round(h["time"], 2)))
+            append(out, dict(instance=name, N=N, method=m_bd, lb=round(r.lb, 4), lb0=round(r.lp_bound, 4),
+                             ub=round(r.ub, 4) if np.isfinite(r.ub) else "",
+                             gap_pct=round(100 * r.gap, 4) if np.isfinite(r.gap) else "",
+                             proved=int(r.proved_optimal), seconds=round(r.seconds, 1), build_seconds="",
+                             iterations=r.phase1_rounds, bundles=r.candidates, unproved_bundles=r.cuts))
+            if r.y is not None:
+                save_design(des, name, m_bd, r.y)
+            print(f"  {m_bd.upper()}: LP={r.lp_bound:.2f} LB={r.lb:.2f} UB={r.ub:.2f} gap={100 * r.gap:.3f}% "
+                  f"rounds={r.phase1_rounds} candidates={r.candidates} cuts={r.cuts} ({r.seconds:.0f}s)", flush=True)
     print(f"\nresults in {args.out}/")
 
 
