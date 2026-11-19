@@ -278,3 +278,16 @@ the model is the special case of ours with design arcs only, no spot capacity an
 objective coefficients (bundles) or design bounds (recourse) afterwards; `BundledLagrangian(backend=...)`
 uses it. `solve_de_gurobi` solves the extensive form with the same strengthening as the benchmark
 (q_aks <= min(U_a, d_ks) y_a). `run_snd.py` compares both under the same time budget.
+
+## v13: hard time budget and diagnosis options for `run_snd.py`
+
+- The LD budget is now a hard wall-clock limit: every bundle MILP gets at most the remaining time, and an
+  iteration that the deadline interrupts is discarded, so the reported bounds are those of the last
+  complete iteration (valid, and within the budget). The local search of the primal recovery also stops
+  at the deadline.
+- `--bundle-gap` (MIP gap of the bundle MILPs; the bound stays valid because it is Gurobi's ObjBound),
+  `--theta` (Polyak factor) and `--tag` (variant label: method `ld_<tag>` or `de_<tag>`).
+- `snd.csv` gains `lb0`, the LD bound at zero multipliers (the bundle, or group-subproblem, bound);
+  `history.csv` gains a `method` column.
+- `phase_snd.sh`: diagnosis on the main IDSR instance (seed 2): bundle MIP gap, Polyak factor, bundle
+  size, and Gurobi with one hour.

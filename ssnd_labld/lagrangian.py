@@ -97,6 +97,8 @@ class BundledLagrangian:
         self.n_recourse_solves = 0
         self.n_design_evals = 0
         self.n_unproved = 0
+        self._deadline = None                   # absolute wall-clock deadline (backend runs only)
+        self.timed_out = False
         self.open_count = np.zeros(self.n)      # how often each service was opened in a bundle solution
 
     # ------------------------------------------------------------------ dual side
@@ -109,7 +111,9 @@ class BundledLagrangian:
         lam = np.asarray(lam, dtype=float)
         assert lam.shape == (self.m, self.n)
         if self.backend is not None:
-            vals, ys, proved = self.backend.solve_bundles(lam)
+            vals, ys, proved, complete = self.backend.solve_bundles(lam, deadline=self._deadline)
+            if not complete:                    # time ran out inside the iteration: L(lam) is not valid
+                return None, None
             self.n_bundle_solves += self.m
             self.n_unproved += int((~proved).sum())
             self.open_count += (ys > 0.5).sum(axis=0)
@@ -137,8 +141,12 @@ class BundledLagrangian:
         cands = [np.zeros((self.m, self.n))] + [self.project(c) for c in candidates]
         labels = ["zero"] + list(names or [f"cand{i}" for i in range(len(candidates))])
         best = None
-        for lam, lab in zip(cands, labels):
+        for i, (lam, lab) in enumerate(zip(cands, labels)):
+            dl, self._deadline = self._deadline, (None if i == 0 else self._deadline)
             L, ys = self.evaluate(lam)
+            self._deadline = dl
+            if L is None:
+                continue
             if self.verbose:
                 print(f"  guard: L({lab}) = {L:.3f}")
             if best is None or L > best[0]:
@@ -167,7 +175,7 @@ class BundledLagrangian:
 
         # recourse repair: add services while shortage or spot use remains and adding pays off
         for a in order_add:
-            if evals >= self.ls_max_evals:
+            if evals >= self.ls_max_evals or self._out_of_time():
                 break
             needs_repair = any(r.shortage > 1e-6 or r.spot > 1e-6 for r in ev.per_scenario)
             if not needs_repair:
@@ -180,10 +188,10 @@ class BundledLagrangian:
         # local improvement: first-improvement drop / add moves
         if self.local_search:
             improved = True
-            while improved and evals < self.ls_max_evals:
+            while improved and evals < self.ls_max_evals and not self._out_of_time():
                 improved = False
                 for a in [x for x in order_drop if y[x] == 1.0] + [x for x in order_add if y[x] == 0.0]:
-                    if evals >= self.ls_max_evals:
+                    if evals >= self.ls_max_evals or self._out_of_time():
                         break
                     y2 = dict(y); y2[a] = 1.0 - y[a]
                     ev2 = self._eval_design(y2); evals += 1
@@ -192,10 +200,15 @@ class BundledLagrangian:
                         break
         return y, ev
 
+    def _out_of_time(self) -> bool:
+        return self._deadline is not None and time.time() >= self._deadline
+
     # ------------------------------------------------------------------ main loop
     def run(self, candidates: Optional[Sequence[np.ndarray]] = None,
             candidate_names: Optional[Sequence[str]] = None) -> LDResult:
         t0 = time.time()
+        if self.backend is not None and self.time_limit is not None:
+            self._deadline = t0 + self.time_limit
         L, ys, lam, src = self.guarded_start(candidates or [], candidate_names)
         best_lb, best_ub, best_y, best_ev = L, np.inf, None, None
         best_lam, best_ys = lam.copy(), ys.copy()
@@ -206,7 +219,7 @@ class BundledLagrangian:
         while True:
             # (bundle solutions at lam are already available: no redundant re-solve, audit 5.1)
             U_t = None
-            if self.primal_recovery and (t % self.recovery_every == 0):
+            if self.primal_recovery and (t % self.recovery_every == 0) and (t == 0 or not self._out_of_time()):
                 y_hat, ev = self.recover_primal(ys, best_ub)
                 U_t = ev.expected_total_cost
                 if U_t < best_ub:
@@ -229,8 +242,12 @@ class BundledLagrangian:
                 alpha = theta * (best_ub - L) / (gnorm2 + self.eps)
             else:
                 alpha = self.alpha0 / np.sqrt(t + 1)
-            lam = self.project(lam + alpha * g)
-            L, ys = self.evaluate(lam)
+            lam_new = self.project(lam + alpha * g)
+            L_new, ys_new = self.evaluate(lam_new)
+            if L_new is None:                   # deadline hit inside the iteration: keep the last valid state
+                self.timed_out = True
+                break
+            lam, L, ys = lam_new, L_new, ys_new
             t += 1
             if L > best_lb + 1e-9:
                 best_lb, best_lam, best_ys, no_improve = L, lam.copy(), ys.copy(), 0

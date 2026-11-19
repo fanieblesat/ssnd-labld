@@ -165,23 +165,41 @@ class GurobiBackend:
                   flush=True)
 
     # ------------------------------------------------------------------ bundles
-    def solve_bundles(self, lam: np.ndarray):
-        """Returns (values, ys, proved): values[b] is a valid lower bound on phi_b(lam_b)."""
+    def solve_bundles(self, lam: np.ndarray, deadline: Optional[float] = None):
+        """Returns (values, ys, proved, complete): values[b] is a valid lower bound on phi_b(lam_b).
+
+        With a deadline (absolute time.time()), each bundle MILP gets at most the remaining time; a
+        bundle that cannot start before the deadline, or whose solve ends without a finite bound,
+        makes the result incomplete (complete=False), and the caller must discard L(lam)."""
         m = len(self.bmodels)
         vals, ys, proved = np.zeros(m), np.zeros((m, len(self.T.sids))), np.zeros(m, dtype=bool)
+        ok = np.ones(m, dtype=bool)
 
         def work(w):
             for b in range(w, m, self.P):
                 bm = self.bmodels[b]
+                if deadline is not None:
+                    rem = deadline - time.time()
+                    if rem <= 0.5:
+                        ok[b] = False
+                        continue
+                    lim = rem if self.bundle_time_limit is None else min(self.bundle_time_limit, rem)
+                    bm.model.Params.TimeLimit = lim
                 bm.y.Obj = bm.P * self.T.F + lam[b]
                 bm.model.optimize()
-                vals[b] = bm.model.ObjBound
+                bound = bm.model.ObjBound
+                if not np.isfinite(bound) or abs(bound) >= GRB.INFINITY:
+                    ok[b] = False
+                    continue
+                vals[b] = bound
                 ys[b] = (bm.y.X > 0.5).astype(float) if bm.model.SolCount > 0 else 0.0
                 proved[b] = bm.model.Status == GRB.OPTIMAL
+                if bm.model.SolCount == 0:
+                    ok[b] = False
 
         with ThreadPoolExecutor(max_workers=self.P) as ex:
             list(ex.map(work, range(self.P)))
-        return vals, ys, proved
+        return vals, ys, proved, bool(ok.all())
 
     # ------------------------------------------------------------------ designs
     def evaluate_design(self, y: Dict[int, float], cache: Optional[Dict] = None) -> DesignEvaluation:

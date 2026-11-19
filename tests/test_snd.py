@@ -56,3 +56,24 @@ def test_backend_matches_pulp_and_bounds_are_valid():
     tol = 1e-6 * abs(de_fast.objective)
     assert r.best_lb <= de_fast.objective + tol and de_fast.objective <= r.best_ub + tol
     be.close()
+
+
+@pytest.mark.skipif(not _gurobi_ok(), reason="Gurobi not available")
+def test_deadline_keeps_bounds_valid():
+    """A deadline that expires inside an iteration discards that iteration; bounds stay valid."""
+    import time
+    from ssnd_labld.grb_backend import GurobiBackend, solve_de_gurobi
+    inst = _small_snd(N=8, seed=1)
+    de = solve_de_gurobi(inst, threads=1, mip_gap=1e-9)
+    be = GurobiBackend(inst, parallel=2)
+    B = stratified_bundles(inst, 4, seed=0, evaluator=be.evaluate_design)
+    be.set_bundles(B)
+    lam = np.zeros((4, len(inst.service_ids)))
+    vals, ys, proved, complete = be.solve_bundles(lam, deadline=time.time() - 1.0)
+    assert not complete
+    ld = BundledLagrangian(inst, B, max_iter=10000, time_limit=0.3, parallel=2, backend=be)
+    r = ld.run()
+    tol = 1e-6 * abs(de.objective)
+    assert r.best_lb <= de.objective + tol and de.objective <= r.best_ub + tol
+    assert r.seconds < 5.0
+    be.close()
