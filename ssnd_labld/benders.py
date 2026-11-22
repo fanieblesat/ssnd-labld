@@ -194,11 +194,8 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
     lb = float(m.ObjBound) if m.SolCount > 0 or m.Status == GRB.OPTIMAL else lp_bound
     lb = max(lb, lp_bound)
     proved = m.Status == GRB.OPTIMAL
-    if m.SolCount > 0:                                   # master incumbent: evaluate it exactly as well
-        yv = np.round(y.X)
-        full = float(T.F @ yv + p @ _recourse_and_subgradients(be, yv)[0])
-        if full < best_ub:
-            best_ub, best_y = full, yv
+    # every master incumbent passes the MIPSOL callback (lazy-constraint mode), where it is evaluated on
+    # all scenarios, so no final re-evaluation is needed (it cost up to 50 s beyond the budget at N = 5,000)
     m.dispose(); env.dispose()
     if own_be:
         be.close()

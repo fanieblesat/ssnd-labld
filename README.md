@@ -304,3 +304,14 @@ candidate is evaluated on all scenarios, so the upper bound is an exact full-set
 In `snd.csv`, rows of method `bd` use `lb0` for the master LP bound after phase 1, `iterations` for the
 LP cut rounds, `bundles` for the integer candidates evaluated and `unproved_bundles` for the number of
 cuts. `phase_bd.sh` runs Benders on the five IDSR instances (about 2.5 hours).
+
+## v15: tuning protocol and fixes
+
+- Instances are identified by their `label` (unique across configurations; the file names repeat between
+  `main/` and `scaling/`), and `run_snd.py` checks the CSV headers at startup.
+- Benders no longer re-evaluates the final incumbent (every incumbent is already evaluated in the
+  callback), so it stays within the budget.
+- `phase_tune.sh`: pre-registered tuning on seeds 3 and 4 (base N = 500 and 2,000; stressed N = 500),
+  one factor at a time from the default, 21 h in total, split over two machines with `PART=1` / `PART=2`.
+  `select_tuning.py` applies the selection rule (smallest mean certified gap; ties go to the default).
+  Seeds 1, 2 and 6-10 are reserved for the evaluation; seed 5 is spare.

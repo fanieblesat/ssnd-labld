@@ -51,6 +51,20 @@ def append(path, row):
         w.writerow(row)
 
 
+SND_COLS = ["instance", "N", "method", "lb", "lb0", "ub", "gap_pct", "proved", "seconds", "build_seconds",
+            "iterations", "bundles", "unproved_bundles"]
+HIST_COLS = ["instance", "method", "t", "L", "LB", "UB", "time"]
+
+
+def check_header(path, cols):
+    """Fail at startup (not after a 30-minute solve) if an existing CSV has another header."""
+    if os.path.exists(path):
+        with open(path) as f:
+            header = f.readline().strip().split(",")
+        if header != cols:
+            raise SystemExit(f"{path}: header {header} differs from {cols}; repair it or use a new --out folder")
+
+
 def done(path):
     if not os.path.exists(path):
         return set()
@@ -88,6 +102,8 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     json.dump(vars(args), open(os.path.join(args.out, "snd_args.json"), "w"), indent=1)
     out, hist, des = (os.path.join(args.out, f) for f in ("snd.csv", "history.csv", "designs.json"))
+    check_header(out, SND_COLS)
+    check_header(hist, HIST_COLS)
     finished = done(out)
     strong = not args.no_strong_linking
     sfx = f"_{args.tag}" if args.tag else ""
@@ -95,7 +111,8 @@ def main():
 
     for path in args.instances:
         inst = read_snd(path)
-        name, N = os.path.basename(path), len(inst.scenarios)
+        # the label is unique across configurations (file names repeat between main/ and scaling/)
+        name, N = (inst.meta.get("label") or os.path.basename(path)), len(inst.scenarios)
         print(f"\n##### {name}: |V|={len(inst.nodes)} |A|={len(inst.arcs)} |K|={len(inst.commodities)} N={N}",
               flush=True)
 
