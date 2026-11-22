@@ -79,7 +79,7 @@ def main():
     tl = lambda v: None if not v else v
     solver = get_solver(args.solver, time_limit=tl(args.bundle_time_limit))
     lp_solver = get_solver(args.solver)
-    de_solver = get_solver(args.solver, time_limit=tl(args.de_time_limit))
+    de_solver = get_solver(args.solver, time_limit=tl(args.de_time_limit), threads=args.parallel)
     cap = (math.ceil(1.5 * args.scenarios / args.bundles) if args.max_bundle_size < 0
            else (args.max_bundle_size or None))
     parts = [p.strip() for p in args.partitions.split(",") if p.strip()]
