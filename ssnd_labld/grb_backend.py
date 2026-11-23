@@ -201,6 +201,39 @@ class GurobiBackend:
             list(ex.map(work, range(self.P)))
         return vals, ys, proved, bool(ok.all())
 
+    def resolve_bundles(self, idx: Sequence[int], deadline: Optional[float] = None):
+        """Give the bundle MILPs in idx more time at their current objective (no model change).
+
+        Gurobi may resume the search or restart it; either way the returned ObjBound is a valid bound, and
+        the caller keeps the larger of the old and the new one. Returns (vals, ys, proved) for idx, with
+        vals[i] = -inf where no bound could be obtained before the deadline."""
+        idx = list(idx)
+        vals = np.full(len(idx), -np.inf)
+        ys = np.zeros((len(idx), len(self.T.sids)))
+        proved = np.zeros(len(idx), dtype=bool)
+
+        def work(w):
+            for j in range(w, len(idx), self.P):
+                bm = self.bmodels[idx[j]]
+                lim = GRB.INFINITY if self.bundle_time_limit is None else self.bundle_time_limit
+                if deadline is not None:
+                    rem = deadline - time.time()
+                    if rem <= 0.5:
+                        continue
+                    lim = min(lim, rem)
+                bm.model.Params.TimeLimit = lim
+                bm.model.optimize()
+                bound = bm.model.ObjBound
+                if np.isfinite(bound) and abs(bound) < GRB.INFINITY:
+                    vals[j] = bound
+                if bm.model.SolCount > 0:
+                    ys[j] = (bm.y.X > 0.5).astype(float)
+                proved[j] = bm.model.Status == GRB.OPTIMAL
+
+        with ThreadPoolExecutor(max_workers=self.P) as ex:
+            list(ex.map(work, range(self.P)))
+        return vals, ys, proved
+
     # ------------------------------------------------------------------ designs
     def evaluate_design(self, y: Dict[int, float], cache: Optional[Dict] = None) -> DesignEvaluation:
         key = design_key(self.inst, y)

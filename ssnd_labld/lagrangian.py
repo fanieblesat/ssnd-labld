@@ -98,6 +98,7 @@ class BundledLagrangian:
         self.n_design_evals = 0
         self.n_unproved = 0
         self._deadline = None                   # absolute wall-clock deadline (backend runs only)
+        self._last = None                       # (lam, bundle bounds, bundle designs, proved) of the last evaluation
         self.timed_out = False
         self.open_count = np.zeros(self.n)      # how often each service was opened in a bundle solution
 
@@ -117,6 +118,7 @@ class BundledLagrangian:
             self.n_bundle_solves += self.m
             self.n_unproved += int((~proved).sum())
             self.open_count += (ys > 0.5).sum(axis=0)
+            self._last = (lam.copy(), vals.copy(), ys.copy(), proved.copy())
             return float(vals.sum()), ys
         if self.parallel > 1:
             with ThreadPoolExecutor(max_workers=self.parallel) as ex:
@@ -200,6 +202,29 @@ class BundledLagrangian:
                         break
         return y, ev
 
+    def _tighten_unproved(self):
+        """Zero subgradient with bundle MILPs stopped at their cap: the bound is not final, because the
+        unfinished bundles can still be solved further at the same multipliers. Give them more time and
+        keep the larger bound per bundle. Returns (L, ys) or None if nothing improved."""
+        if self.backend is None or getattr(self, "_last", None) is None:
+            return None
+        lam, vals, ys, proved = self._last
+        idx = np.nonzero(~proved)[0]
+        if len(idx) == 0 or self._out_of_time():
+            return None
+        nv, ny, npr = self.backend.resolve_bundles(idx, deadline=self._deadline)
+        self.n_bundle_solves += len(idx)
+        better = nv > vals[idx] + 1e-9
+        if not better.any():
+            return None
+        vals, ys, proved = vals.copy(), ys.copy(), proved.copy()
+        vals[idx] = np.maximum(vals[idx], nv)
+        has = ny.any(axis=1) | npr
+        ys[idx[has]] = ny[has]
+        proved[idx] = npr
+        self._last = (lam, vals, ys, proved)
+        return float(vals.sum()), ys
+
     def _out_of_time(self) -> bool:
         return self._deadline is not None and time.time() >= self._deadline
 
@@ -233,6 +258,15 @@ class BundledLagrangian:
                 ub = f"{best_ub:.2f}" if np.isfinite(best_ub) else "  inf"
                 print(f"  t={t:3d}  L={L:10.2f}  LB*={best_lb:10.2f}  UB*={ub:>10}  gap={100 * gap:6.2f}%  "
                       f"||g||={np.sqrt(gnorm2):.3f}  theta={theta:.3g}")
+            # zero subgradient but bundles stopped at their cap: tighten them instead of stopping
+            if gnorm2 <= 1e-12 and gap > self.gap_tol and t + 1 < self.max_iter:
+                tight = self._tighten_unproved()
+                if tight is not None:
+                    L, ys = tight
+                    t += 1
+                    if L > best_lb + 1e-9:
+                        best_lb, best_lam, best_ys = L, lam.copy(), ys.copy()
+                    continue
             # stopping
             if gap <= self.gap_tol or gnorm2 <= 1e-12 or t + 1 >= self.max_iter or \
                     (self.time_limit is not None and time.time() - t0 > self.time_limit):

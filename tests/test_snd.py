@@ -101,3 +101,22 @@ def test_benders_matches_de(ev_block):
     assert abs(r.ub - de.objective) <= tol and r.lb <= de.objective + tol
     assert r.lp_bound <= de.objective + tol
     be.close()
+
+
+@pytest.mark.skipif(not _gurobi_ok(), reason="Gurobi not available")
+def test_resolve_bundles_keeps_valid_bounds():
+    """More time for capped bundle MILPs: bounds stay valid lower bounds and the result is consistent."""
+    from ssnd_labld.grb_backend import GurobiBackend, solve_de_gurobi
+    inst = _small_snd(N=8, seed=4)
+    de = solve_de_gurobi(inst, threads=1, mip_gap=1e-9)
+    be = GurobiBackend(inst, parallel=2, bundle_time_limit=1e-3)
+    B = stratified_bundles(inst, 2, seed=0, evaluator=be.evaluate_design)
+    be.set_bundles(B)
+    lam = np.zeros((2, len(inst.service_ids)))
+    v0, _, _, _ = be.solve_bundles(lam)
+    be.bundle_time_limit = 60
+    v1, ys, proved = be.resolve_bundles([0, 1])
+    tol = 1e-6 * abs(de.objective)
+    assert np.maximum(v0, v1).sum() <= de.objective + tol
+    assert proved.all() and ys.shape == (2, len(inst.service_ids))
+    be.close()

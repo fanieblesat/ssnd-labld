@@ -315,3 +315,11 @@ cuts. `phase_bd.sh` runs Benders on the five IDSR instances (about 2.5 hours).
   one factor at a time from the default, 21 h in total, split over two machines with `PART=1` / `PART=2`.
   `select_tuning.py` applies the selection rule (smallest mean certified gap; ties go to the default).
   Seeds 1, 2 and 6-10 are reserved for the evaluation; seed 5 is spare.
+
+## v16: tightening at a zero subgradient
+
+When all bundles agree on the design (zero subgradient) but some bundle MILPs stopped at their time cap,
+LD no longer stops: it gives the unfinished bundles more time at the same multipliers (keeping the larger
+bound per bundle) and continues while the bound improves and budget remains. With exact bundle solves the
+behaviour is unchanged. All tuning runs of the selected setting (bundles of 20) solved every bundle MILP
+to optimality, so the tuning results are unaffected.
