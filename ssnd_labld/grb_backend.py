@@ -75,6 +75,8 @@ class _Template:
         self.U = np.array([a.U for a in inst.arcs])
         self.F = np.array([inst.arcs[a].F for a in self.sids])
         self.pen = np.array([k.penalty for k in inst.commodities])
+        # all cost coefficients nonnegative => every bundle value at lambda = 0 is >= 0 (used as a fallback bound)
+        self.nonneg = bool((self.F >= 0).all() and (self.cost >= 0).all() and (self.pen >= 0).all())
         self.aux_cap = [(a.id, a.cap) for a in inst.arcs if not a.is_service and a.cap is not None]
 
     def add_scenario(self, m, s, y, weight: float):
@@ -165,36 +167,46 @@ class GurobiBackend:
                   flush=True)
 
     # ------------------------------------------------------------------ bundles
-    def solve_bundles(self, lam: np.ndarray, deadline: Optional[float] = None):
+    def solve_bundles(self, lam: np.ndarray, deadline: Optional[float] = None, partial_ok: bool = False):
         """Returns (values, ys, proved, complete): values[b] is a valid lower bound on phi_b(lam_b).
 
-        With a deadline (absolute time.time()), each bundle MILP gets at most the remaining time; a
-        bundle that cannot start before the deadline, or whose solve ends without a finite bound,
-        makes the result incomplete (complete=False), and the caller must discard L(lam)."""
+        With a deadline (absolute time.time()), each worker splits its remaining time equally over its
+        remaining bundles (capped by bundle_time_limit), so a round of bundle solves ends by the deadline.
+        A bundle that gets no time or no finite bound makes the result incomplete, unless partial_ok is set
+        and lam = 0 on that bundle with nonnegative costs: then 0 is a valid bound for it (zero start only)."""
         m = len(self.bmodels)
         vals, ys, proved = np.zeros(m), np.zeros((m, len(self.T.sids))), np.zeros(m, dtype=bool)
         ok = np.ones(m, dtype=bool)
+        zero_ok = partial_ok and self.T.nonneg
+
+        def missing(b):
+            if zero_ok and not np.any(lam[b]):
+                vals[b] = 0.0
+            else:
+                ok[b] = False
 
         def work(w):
-            for b in range(w, m, self.P):
+            mine = list(range(w, m, self.P))
+            for k, b in enumerate(mine):
                 bm = self.bmodels[b]
                 if deadline is not None:
                     rem = deadline - time.time()
-                    if rem <= 0.5:
-                        ok[b] = False
+                    share = rem / (len(mine) - k)
+                    if rem <= 0.5 or share <= 0.5:
+                        missing(b)
                         continue
-                    lim = rem if self.bundle_time_limit is None else min(self.bundle_time_limit, rem)
+                    lim = share if self.bundle_time_limit is None else min(self.bundle_time_limit, share)
                     bm.model.Params.TimeLimit = lim
                 bm.y.Obj = bm.P * self.T.F + lam[b]
                 bm.model.optimize()
                 bound = bm.model.ObjBound
                 if not np.isfinite(bound) or abs(bound) >= GRB.INFINITY:
-                    ok[b] = False
+                    missing(b)
                     continue
                 vals[b] = bound
                 ys[b] = (bm.y.X > 0.5).astype(float) if bm.model.SolCount > 0 else 0.0
                 proved[b] = bm.model.Status == GRB.OPTIMAL
-                if bm.model.SolCount == 0:
+                if bm.model.SolCount == 0 and not zero_ok:
                     ok[b] = False
 
         with ThreadPoolExecutor(max_workers=self.P) as ex:

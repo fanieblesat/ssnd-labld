@@ -171,9 +171,15 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
 
     def _on_solution(model):
         nonlocal best_ub, best_y
+        # an evaluation started too close to the deadline would overrun it: stop the search instead
+        if time.time() + state.get("eval_s", 0.0) > deadline:
+            model.terminate()
+            return
+        t_eval = time.time()
         yv = np.round(np.array(model.cbGetSolution(ylist)))
         tv = np.array(model.cbGetSolution(thlist))
         Q, G = _recourse_and_subgradients(be, yv)
+        state["eval_s"] = max(state.get("eval_s", 0.0), time.time() - t_eval)
         state["cands"] += 1
         full = float(T.F @ yv + p @ Q)
         if full < best_ub:

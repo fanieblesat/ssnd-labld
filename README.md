@@ -323,3 +323,13 @@ LD no longer stops: it gives the unfinished bundles more time at the same multip
 bound per bundle) and continues while the bound improves and budget remains. With exact bundle solves the
 behaviour is unchanged. All tuning runs of the selected setting (bundles of 20) solved every bundle MILP
 to optimality, so the tuning results are unaffected.
+
+## v17: every method inside the budget
+
+- LD: in every round of bundle solves (the zero start included) each worker splits its remaining time
+  equally over its remaining bundles, capped at the bundle time limit, so the round ends by the deadline.
+  A bundle the zero start cannot reach counts with the bound 0 (valid: all costs are nonnegative). v16 gave
+  the zero start no deadline, which let LD overrun the budget by 774 s on one N = 5,000 instance.
+- Benders: the callback does not start a candidate evaluation that would end after the deadline (it
+  overran by up to 51 s at N = 5,000).
+- `phase_eval.sh`: DE rows go to `OUT_DE` (default `results/eval`), LD and Benders rows to `OUT`.

@@ -106,13 +106,14 @@ class BundledLagrangian:
     def project(self, lam: np.ndarray) -> np.ndarray:
         return project_balanced(lam)
 
-    def evaluate(self, lam: np.ndarray):
+    def evaluate(self, lam: np.ndarray, partial_ok: bool = False):
         """L(lambda) and the bundle solutions y^b (m x n). Bundle subproblems run in parallel threads
         (CBC runs as a subprocess, so threads give real parallelism)."""
         lam = np.asarray(lam, dtype=float)
         assert lam.shape == (self.m, self.n)
         if self.backend is not None:
-            vals, ys, proved, complete = self.backend.solve_bundles(lam, deadline=self._deadline)
+            vals, ys, proved, complete = self.backend.solve_bundles(lam, deadline=self._deadline,
+                                                                     partial_ok=partial_ok)
             if not complete:                    # time ran out inside the iteration: L(lam) is not valid
                 return None, None
             self.n_bundle_solves += self.m
@@ -144,9 +145,8 @@ class BundledLagrangian:
         labels = ["zero"] + list(names or [f"cand{i}" for i in range(len(candidates))])
         best = None
         for i, (lam, lab) in enumerate(zip(cands, labels)):
-            dl, self._deadline = self._deadline, (None if i == 0 else self._deadline)
-            L, ys = self.evaluate(lam)
-            self._deadline = dl
+            # the zero start also respects the deadline; bundles it cannot reach count with the bound 0
+            L, ys = self.evaluate(lam, partial_ok=(i == 0))
             if L is None:
                 continue
             if self.verbose:
