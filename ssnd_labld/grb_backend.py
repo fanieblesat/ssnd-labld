@@ -38,12 +38,23 @@ except ImportError:          # pragma: no cover
     gp = None
 
 
-def _new_env(threads: int = 1):
-    env = gp.Env(empty=True)
-    env.setParam("OutputFlag", 0)
-    env.setParam("Threads", threads)
-    env.start()
-    return env
+def _new_env(threads: int = 1, retries: int = 6):
+    """A Gurobi environment. With a web (WLS) licence, starting it fetches a licence token over the
+    internet, so a short network outage must not end the run: retry with back-off (5, 10, 20, 40, 80 s)."""
+    delay = 5.0
+    for attempt in range(retries):
+        try:
+            env = gp.Env(empty=True)
+            env.setParam("OutputFlag", 0)
+            env.setParam("Threads", threads)
+            env.start()
+            return env
+        except gp.GurobiError as e:
+            if attempt == retries - 1:
+                raise
+            print(f"  Gurobi environment not started ({e}); retrying in {delay:.0f}s", flush=True)
+            time.sleep(delay)
+            delay *= 2
 
 
 class _Template:
