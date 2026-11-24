@@ -326,10 +326,15 @@ to optimality, so the tuning results are unaffected.
 
 ## v17: every method inside the budget
 
+One rule for every method: a step starts only if it can finish before the deadline.
 - LD: in every round of bundle solves (the zero start included) each worker splits its remaining time
-  equally over its remaining bundles, capped at the bundle time limit, so the round ends by the deadline.
-  A bundle the zero start cannot reach counts with the bound 0 (valid: all costs are nonnegative). v16 gave
-  the zero start no deadline, which let LD overrun the budget by 774 s on one N = 5,000 instance.
-- Benders: the callback does not start a candidate evaluation that would end after the deadline (it
-  overran by up to 51 s at N = 5,000).
+  equally over its remaining bundles, capped at the bundle time limit; rounds end early enough to leave
+  time for one design evaluation (measured duration). A bundle the zero start cannot reach counts with the
+  bound 0 (valid: all costs are nonnegative). Primal recovery and local search start an evaluation only if
+  it fits; the tightening of capped bundles uses the same equal share. v16 gave the zero start no deadline,
+  which let LD overrun the budget by 774 s on one N = 5,000 instance.
+- Benders: neither the cut rounds on the LP nor the callback start a candidate evaluation that would end
+  after the deadline (v16 overran by up to 51 s at N = 5,000).
+- `preflight.py`: full-scale check before a long evaluation (budget kept, LB <= UB, all bounds consistent
+  across methods), on a tuning-seed instance.
 - `phase_eval.sh`: DE rows go to `OUT_DE` (default `results/eval`), LD and Benders rows to `OUT`.

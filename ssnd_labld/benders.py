@@ -130,7 +130,7 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
         return added
 
     # ---------------- phase 1: Kelley on the LP relaxation
-    lp_bound, rounds, stall = -np.inf, 0, 0
+    lp_bound, rounds, stall, p1_eval = -np.inf, 0, 0, 0.0
     t1_end = t0 + phase1_share * time_limit
     while rounds < phase1_max_rounds and time.time() < t1_end:
         m.Params.TimeLimit = max(1.0, t1_end - time.time())
@@ -139,7 +139,11 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
             break
         rounds += 1
         yv, tv, val = y.X.copy(), th.X.copy(), m.ObjVal
+        if time.time() + p1_eval > deadline:
+            break
+        t_ev = time.time()
         Q, G = _recourse_and_subgradients(be, yv)
+        p1_eval = max(p1_eval, time.time() - t_ev)
         if add_cuts(yv, Q, G, tv, m.addConstr) == 0:
             lp_bound = val
             break
@@ -158,7 +162,7 @@ def solve_benders(inst: SSNDInstance, time_limit: float = 1800.0, threads: int =
     m.Params.LazyConstraints = 1
     m.Params.MIPGap = mip_gap
     m.Params.TimeLimit = max(1.0, deadline - time.time())
-    state = dict(cands=0)
+    state = dict(cands=0, eval_s=p1_eval)
 
     def cb(model, where):
         if where != GRB.Callback.MIPSOL or "error" in state:

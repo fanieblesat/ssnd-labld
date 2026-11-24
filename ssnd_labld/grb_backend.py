@@ -139,6 +139,7 @@ class GurobiBackend:
         if verbose:
             print(f"  GurobiBackend: {len(self.rmodels)} recourse LPs built in {self.recourse_build_seconds:.1f}s",
                   flush=True)
+        self.eval_s = 0.0                       # longest uncached design evaluation so far (seconds)
         self.bundles, self.bmodels = [], []
         if bundles is not None:
             self.set_bundles(bundles)
@@ -225,14 +226,16 @@ class GurobiBackend:
         proved = np.zeros(len(idx), dtype=bool)
 
         def work(w):
-            for j in range(w, len(idx), self.P):
+            mine = list(range(w, len(idx), self.P))
+            for k, j in enumerate(mine):
                 bm = self.bmodels[idx[j]]
                 lim = GRB.INFINITY if self.bundle_time_limit is None else self.bundle_time_limit
                 if deadline is not None:
                     rem = deadline - time.time()
-                    if rem <= 0.5:
+                    share = rem / (len(mine) - k)          # equal share: the round ends by the deadline
+                    if rem <= 0.5 or share <= 0.5:
                         continue
-                    lim = min(lim, rem)
+                    lim = min(lim, share)
                 bm.model.Params.TimeLimit = lim
                 bm.model.optimize()
                 bound = bm.model.ObjBound
@@ -251,6 +254,7 @@ class GurobiBackend:
         key = design_key(self.inst, y)
         if cache is not None and key in cache:
             return cache[key]
+        t_eval = time.time()
         yv = np.array([float(y[a]) for a in self.T.sids])
         S = len(self.rmodels)
         cost, short, dem = np.zeros(S), np.zeros(S), np.zeros(S)
@@ -279,6 +283,7 @@ class GurobiBackend:
                               expected_spot=0.0, per_scenario=per)
         if cache is not None:
             cache[key] = ev
+        self.eval_s = max(self.eval_s, time.time() - t_eval)
         return ev
 
     def scenario_costs(self, y: Dict[int, float]) -> np.ndarray:

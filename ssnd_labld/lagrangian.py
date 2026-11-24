@@ -112,7 +112,7 @@ class BundledLagrangian:
         lam = np.asarray(lam, dtype=float)
         assert lam.shape == (self.m, self.n)
         if self.backend is not None:
-            vals, ys, proved, complete = self.backend.solve_bundles(lam, deadline=self._deadline,
+            vals, ys, proved, complete = self.backend.solve_bundles(lam, deadline=self._bundle_deadline(),
                                                                      partial_ok=partial_ok)
             if not complete:                    # time ran out inside the iteration: L(lam) is not valid
                 return None, None
@@ -170,6 +170,8 @@ class BundledLagrangian:
         Returns (y_hat, evaluation)."""
         s = (self.P[:, None] * ys).sum(axis=0)                 # vote strength s_a
         y = {a: (1.0 if s[j] >= self.tau else 0.0) for j, a in enumerate(self.sids)}
+        if not self._eval_fits():
+            return None, None
         ev = self._eval_design(y)
         evals = 1
         order_add = [self.sids[j] for j in np.argsort(-s) if y[self.sids[j]] == 0.0]   # strongest votes first
@@ -177,7 +179,7 @@ class BundledLagrangian:
 
         # recourse repair: add services while shortage or spot use remains and adding pays off
         for a in order_add:
-            if evals >= self.ls_max_evals or self._out_of_time():
+            if evals >= self.ls_max_evals or not self._eval_fits():
                 break
             needs_repair = any(r.shortage > 1e-6 or r.spot > 1e-6 for r in ev.per_scenario)
             if not needs_repair:
@@ -190,10 +192,10 @@ class BundledLagrangian:
         # local improvement: first-improvement drop / add moves
         if self.local_search:
             improved = True
-            while improved and evals < self.ls_max_evals and not self._out_of_time():
+            while improved and evals < self.ls_max_evals and self._eval_fits():
                 improved = False
                 for a in [x for x in order_drop if y[x] == 1.0] + [x for x in order_add if y[x] == 0.0]:
-                    if evals >= self.ls_max_evals or self._out_of_time():
+                    if evals >= self.ls_max_evals or not self._eval_fits():
                         break
                     y2 = dict(y); y2[a] = 1.0 - y[a]
                     ev2 = self._eval_design(y2); evals += 1
@@ -212,7 +214,7 @@ class BundledLagrangian:
         idx = np.nonzero(~proved)[0]
         if len(idx) == 0 or self._out_of_time():
             return None
-        nv, ny, npr = self.backend.resolve_bundles(idx, deadline=self._deadline)
+        nv, ny, npr = self.backend.resolve_bundles(idx, deadline=self._bundle_deadline())
         self.n_bundle_solves += len(idx)
         better = nv > vals[idx] + 1e-9
         if not better.any():
@@ -227,6 +229,18 @@ class BundledLagrangian:
 
     def _out_of_time(self) -> bool:
         return self._deadline is not None and time.time() >= self._deadline
+
+    def _eval_fits(self) -> bool:
+        """A design evaluation started now ends before the deadline (measured duration + 10 %)."""
+        if self._deadline is None or self.backend is None:
+            return not self._out_of_time()
+        return time.time() + 1.1 * self.backend.eval_s <= self._deadline
+
+    def _bundle_deadline(self):
+        """Bundle rounds end early enough to leave time for one design evaluation afterwards."""
+        if self._deadline is None or self.backend is None:
+            return self._deadline
+        return self._deadline - 1.2 * self.backend.eval_s
 
     # ------------------------------------------------------------------ main loop
     def run(self, candidates: Optional[Sequence[np.ndarray]] = None,
@@ -246,9 +260,10 @@ class BundledLagrangian:
             U_t = None
             if self.primal_recovery and (t % self.recovery_every == 0) and (t == 0 or not self._out_of_time()):
                 y_hat, ev = self.recover_primal(ys, best_ub)
-                U_t = ev.expected_total_cost
-                if U_t < best_ub:
-                    best_ub, best_y, best_ev = U_t, y_hat, ev
+                if ev is not None:
+                    U_t = ev.expected_total_cost
+                    if U_t < best_ub:
+                        best_ub, best_y, best_ev = U_t, y_hat, ev
             gap = (best_ub - best_lb) / max(abs(best_ub), 1e-9) if np.isfinite(best_ub) else np.inf
             g = self.subgradient(ys)
             gnorm2 = float((g ** 2).sum())
