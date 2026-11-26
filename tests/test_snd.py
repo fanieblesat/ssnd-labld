@@ -120,3 +120,22 @@ def test_resolve_bundles_keeps_valid_bounds():
     assert np.maximum(v0, v1).sum() <= de.objective + tol
     assert proved.all() and ys.shape == (2, len(inst.service_ids))
     be.close()
+
+
+@pytest.mark.skipif(not _gurobi_ok(), reason="Gurobi not available")
+def test_start_from_given_multipliers():
+    """Restarting from a run's final multipliers without the zero guard gives a valid bound at least as
+    good as that run's (same bundles, exact bundle solves)."""
+    from ssnd_labld.grb_backend import GurobiBackend, solve_de_gurobi
+    inst = _small_snd(N=12, seed=5)
+    de = solve_de_gurobi(inst, threads=1, mip_gap=1e-9)
+    be = GurobiBackend(inst, parallel=2)
+    B = stratified_bundles(inst, 4, seed=0, evaluator=be.evaluate_design)
+    be.set_bundles(B)
+    r1 = BundledLagrangian(inst, B, max_iter=15, parallel=2, backend=be).run()
+    r2 = BundledLagrangian(inst, B, max_iter=1, parallel=2, backend=be).run(
+        candidates=[r1.lam_final], candidate_names=["given"], include_zero=False)
+    tol = 1e-6 * abs(de.objective)
+    assert r2.start_source == "given"
+    assert r2.best_lb >= r1.best_lb - tol and r2.best_lb <= de.objective + tol
+    be.close()

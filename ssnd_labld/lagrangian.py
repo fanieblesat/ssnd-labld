@@ -138,15 +138,19 @@ class BundledLagrangian:
         """Projected subgradient g_b = y^b - (1/m) sum_c y^c (already in Lambda)."""
         return ys - ys.mean(axis=0, keepdims=True)
 
-    def guarded_start(self, candidates: Sequence[np.ndarray], names: Optional[Sequence[str]] = None):
+    def guarded_start(self, candidates: Sequence[np.ndarray], names: Optional[Sequence[str]] = None,
+                      include_zero: bool = True):
         """eq. (guard), generalised to any number of candidates: evaluate 0 and every projected candidate,
-        return the one with the largest dual value together with its bundle solutions."""
-        cands = [np.zeros((self.m, self.n))] + [self.project(c) for c in candidates]
-        labels = ["zero"] + list(names or [f"cand{i}" for i in range(len(candidates))])
+        return the one with the largest dual value together with its bundle solutions.
+        include_zero=False starts from the candidates alone (no guard; used for oracle-start experiments)."""
+        cands = [self.project(c) for c in candidates]
+        labels = list(names or [f"cand{i}" for i in range(len(candidates))])
+        if include_zero or not cands:
+            cands, labels = [np.zeros((self.m, self.n))] + cands, ["zero"] + labels
         best = None
         for i, (lam, lab) in enumerate(zip(cands, labels)):
             # the zero start also respects the deadline; bundles it cannot reach count with the bound 0
-            L, ys = self.evaluate(lam, partial_ok=(i == 0))
+            L, ys = self.evaluate(lam, partial_ok=(lab == "zero"))
             if L is None:
                 continue
             if self.verbose:
@@ -244,11 +248,11 @@ class BundledLagrangian:
 
     # ------------------------------------------------------------------ main loop
     def run(self, candidates: Optional[Sequence[np.ndarray]] = None,
-            candidate_names: Optional[Sequence[str]] = None) -> LDResult:
+            candidate_names: Optional[Sequence[str]] = None, include_zero: bool = True) -> LDResult:
         t0 = time.time()
         if self.backend is not None and self.time_limit is not None:
             self._deadline = t0 + self.time_limit
-        L, ys, lam, src = self.guarded_start(candidates or [], candidate_names)
+        L, ys, lam, src = self.guarded_start(candidates or [], candidate_names, include_zero=include_zero)
         best_lb, best_ub, best_y, best_ev = L, np.inf, None, None
         best_lam, best_ys = lam.copy(), ys.copy()
         theta = self.theta_warm if (self.theta_warm and src != "zero") else self.theta

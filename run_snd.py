@@ -92,6 +92,9 @@ def main():
     ap.add_argument("--theta", type=float, default=1.0, help="Polyak factor")
     ap.add_argument("--bd-no-ev", action="store_true", help="Benders without the mean-demand block")
     ap.add_argument("--bd-phase1-share", type=float, default=0.25, help="budget share of the LP cut rounds")
+    ap.add_argument("--save-lambda", default=None, help="save LD's best multipliers to this .npy file")
+    ap.add_argument("--start-lambda", default=None, help="start LD from multipliers in this .npy file")
+    ap.add_argument("--no-zero-guard", action="store_true", help="with --start-lambda: skip the zero start")
     ap.add_argument("--tag", default="", help="variant label appended to the method name")
     ap.add_argument("--recovery-every", type=int, default=3)
     ap.add_argument("--ls-evals", type=int, default=8)
@@ -142,7 +145,11 @@ def main():
                                    time_limit=max(1.0, args.time_limit - t_prep), gap_tol=1e-4,
                                    parallel=args.parallel, verbose=False, ls_max_evals=args.ls_evals,
                                    recovery_every=args.recovery_every, backend=be)
-            res = ld.run()
+            cands = [np.load(args.start_lambda)] if args.start_lambda else None
+            res = ld.run(candidates=cands, candidate_names=["given"] if cands else None,
+                         include_zero=not args.no_zero_guard)
+            if args.save_lambda:
+                np.save(args.save_lambda, res.lam_final)
             for h in res.history:
                 append(hist, dict(instance=name, method=m_ld, t=h["t"], L=round(h["L"], 4), LB=round(h["best_lb"], 4),
                                   UB=round(h["best_ub"], 4) if np.isfinite(h["best_ub"]) else "",
