@@ -94,7 +94,9 @@ def main():
     ap.add_argument("--bd-phase1-share", type=float, default=0.25, help="budget share of the LP cut rounds")
     ap.add_argument("--save-lambda", default=None, help="save LD's best multipliers to this .npy file")
     ap.add_argument("--start-lambda", default=None, help="start LD from multipliers in this .npy file")
-    ap.add_argument("--no-zero-guard", action="store_true", help="with --start-lambda: skip the zero start")
+    ap.add_argument("--no-zero-guard", action="store_true", help="with --start-lambda/--start-policy: skip the zero start")
+    ap.add_argument("--start-policy", default=None, help="start LD from a learned DualStartPolicy (.pkl)")
+    ap.add_argument("--theta-warm", type=float, default=None, help="Polyak factor after an accepted non-zero start")
     ap.add_argument("--tag", default="", help="variant label appended to the method name")
     ap.add_argument("--recovery-every", type=int, default=3)
     ap.add_argument("--ls-evals", type=int, default=8)
@@ -140,14 +142,20 @@ def main():
             B = (stratified_bundles(inst, m, seed=args.seed, basis=args.basis, evaluator=be.evaluate_design)
                  if args.partition == "stratified" else random_bundles(inst, m, seed=args.seed))
             be.set_bundles(B)
+            cands, names = None, None
+            if args.start_lambda:
+                cands, names = [np.load(args.start_lambda)], ["given"]
+            elif args.start_policy:                   # the policy's LP features count in the budget (t_prep)
+                from ssnd_labld.learning import load_models
+                policy, _, _ = load_models(args.start_policy)
+                _, y_lp = be.bundle_lp_designs()
+                cands, names = [policy.multipliers(inst, B, y_lp=y_lp)], ["learned"]
             t_prep = time.time() - t0
             ld = BundledLagrangian(inst, B, step_rule="polyak", theta=args.theta, tau=0.5, max_iter=100000,
                                    time_limit=max(1.0, args.time_limit - t_prep), gap_tol=1e-4,
                                    parallel=args.parallel, verbose=False, ls_max_evals=args.ls_evals,
-                                   recovery_every=args.recovery_every, backend=be)
-            cands = [np.load(args.start_lambda)] if args.start_lambda else None
-            res = ld.run(candidates=cands, candidate_names=["given"] if cands else None,
-                         include_zero=not args.no_zero_guard)
+                                   recovery_every=args.recovery_every, backend=be, theta_warm=args.theta_warm)
+            res = ld.run(candidates=cands, candidate_names=names, include_zero=not args.no_zero_guard)
             if args.save_lambda:
                 np.save(args.save_lambda, res.lam_final)
             for h in res.history:

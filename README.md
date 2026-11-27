@@ -338,3 +338,14 @@ One rule for every method: a step starts only if it can finish before the deadli
 - `preflight.py`: full-scale check before a long evaluation (budget kept, LB <= UB, all bounds consistent
   across methods), on a tuning-seed instance.
 - `phase_eval.sh`: DE rows go to `OUT_DE` (default `results/eval`), LD and Benders rows to `OUT`.
+
+## v19: learning experiments on the SND benchmark
+
+- `GurobiBackend.bundle_lp_designs()`: LP relaxations of the bundle problems (features of the start policy).
+- `run_snd.py --start-policy model.pkl` starts LD from the learned dual start policy (guarded against the
+  zero start unless `--no-zero-guard`); the time for the policy's LP features counts in the budget.
+- `snd_learning.py bundling`: bound at zero multipliers for seven partition rules (random, homogeneous and
+  stratified on demand features and on cost signatures). `snd_learning.py train`: fits the policy on the
+  tuning instances from long LD runs.
+- `phase_learn.sh`: all learning experiments in order of importance (stages long, train, ws_large,
+  bundling, ws_small, ohc), about 45 h, resumable.

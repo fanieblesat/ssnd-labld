@@ -260,6 +260,30 @@ class GurobiBackend:
             list(ex.map(work, range(self.P)))
         return vals, ys, proved
 
+    def bundle_lp_designs(self, lam: Optional[np.ndarray] = None):
+        """LP relaxations of all bundle problems at lam (default 0): (values (m,), fractional designs (m x n)).
+        Solved on relaxed copies, so the persistent MILPs are not changed (their objective is reset by
+        the next solve_bundles)."""
+        m, n = len(self.bmodels), len(self.T.sids)
+        vals, ys = np.zeros(m), np.zeros((m, n))
+
+        def work(w):
+            for b in range(w, m, self.P):
+                bm = self.bmodels[b]
+                bm.y.Obj = bm.P * self.T.F + (0.0 if lam is None else lam[b])
+                bm.model.update()
+                r = bm.model.relax()
+                r.Params.OutputFlag = 0
+                r.Params.Threads = 1
+                r.optimize()
+                vals[b] = r.ObjVal
+                ys[b] = np.array(r.getAttr("X", r.getVars()[:n]))
+                r.dispose()
+
+        with ThreadPoolExecutor(max_workers=self.P) as ex:
+            list(ex.map(work, range(self.P)))
+        return vals, ys
+
     # ------------------------------------------------------------------ designs
     def evaluate_design(self, y: Dict[int, float], cache: Optional[Dict] = None) -> DesignEvaluation:
         key = design_key(self.inst, y)

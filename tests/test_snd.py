@@ -139,3 +139,19 @@ def test_start_from_given_multipliers():
     assert r2.start_source == "given"
     assert r2.best_lb >= r1.best_lb - tol and r2.best_lb <= de.objective + tol
     be.close()
+
+
+@pytest.mark.skipif(not _gurobi_ok(), reason="Gurobi not available")
+def test_bundle_lp_designs_are_relaxations():
+    """Bundle LP values are lower bounds on the bundle MILP values; designs are fractional in [0, 1]."""
+    from ssnd_labld.grb_backend import GurobiBackend
+    inst = _small_snd(N=12, seed=6)
+    be = GurobiBackend(inst, parallel=2)
+    B = stratified_bundles(inst, 3, seed=0, evaluator=be.evaluate_design)
+    be.set_bundles(B)
+    lp, ys = be.bundle_lp_designs()
+    lam = np.zeros((3, len(inst.service_ids)))
+    milp, _, proved, _ = be.solve_bundles(lam)
+    assert proved.all() and np.all(lp <= milp + 1e-6 * np.maximum(1, np.abs(milp)))
+    assert ys.shape == (3, len(inst.service_ids)) and ys.min() >= -1e-9 and ys.max() <= 1 + 1e-9
+    be.close()
