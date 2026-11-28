@@ -349,3 +349,12 @@ One rule for every method: a step starts only if it can finish before the deadli
   tuning instances from long LD runs.
 - `phase_learn.sh`: all learning experiments in order of importance (stages long, train, ws_large,
   bundling, ws_small, ohc), about 45 h, resumable.
+
+## v19.1: training cases with headroom
+
+The first training set (base N = 500, seeds 3-5) had headroom on one instance only: on the other two, LD
+closes the gap at zero multipliers, so the closure objective is undefined there and the policy was fitted
+on a single case. `phase_learn.sh` now trains on the tuning instances that have headroom (base N = 2,000 and
+stressed N = 500, seeds 3 and 4), with LB* from the tuning runs (`results/tune/snd.csv`, method `ld_b20`),
+a 60 s cap per bundle problem during training and L(0) re-evaluated with the same cap. The policy is
+`models/snd_policy_v2.pkl`; its runs carry the tags `ws2` and `wsng2`.

@@ -136,11 +136,16 @@ def cmd_train(a):
         B = stratified_bundles(inst, m, seed=0, basis="costsig", evaluator=be.evaluate_design)
         be.set_bundles(B)
         _, y_lp = be.bundle_lp_designs()
-        L0, LBstar = long[name]
+        L0_run, LBstar = long[name]
+        # L(0) is re-evaluated with the training cap, so that L(0) and L(lambda(w)) are computed alike
+        vals0, _, _, ok0 = be.solve_bundles(np.zeros((len(B), len(inst.service_ids))))
+        L0 = float(vals0.sum()) if ok0 else L0_run
+        LBstar = max(LBstar, L0)
         cases.append(dict(inst=inst, bundles=B, D=policy_directions(inst, B, y_lp), L0=L0, LBstar=LBstar,
                           be=be, name=name))
         backends.append(be)
-        print(f"case {name}: L0={L0:.2f} LB*={LBstar:.2f} m={m}", flush=True)
+        print(f"case {name}: L0={L0:.2f} (run {L0_run:.2f}) LB*={LBstar:.2f} headroom={LBstar - L0:.2f} m={m}",
+              flush=True)
 
     def evaluate(case, lam):
         vals, _, _, complete = case["be"].solve_bundles(lam)
